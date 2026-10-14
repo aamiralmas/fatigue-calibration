@@ -1,0 +1,134 @@
+"""Generate tex/numbers.tex (LaTeX macros) and tex/plotdata/*.dat from results/*.json."""
+import json, os
+import numpy as np
+
+R = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+T = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tex")
+os.makedirs(os.path.join(T, "plotdata"), exist_ok=True)
+e1 = json.load(open(f"{R}/e1_accuracy.json"))
+e2 = json.load(open(f"{R}/e2_conformal.json"))
+e3 = json.load(open(f"{R}/e3_budget.json"))
+e5 = json.load(open(f"{R}/e5_cu.json"))
+e6 = json.load(open(f"{R}/e6_onesided.json"))
+M = {}
+
+
+def f(x, n=1):
+    return f"{x:.{n}f}"
+
+
+def pct(x, n=1):
+    return f"{100*x:.{n}f}"
+
+
+# E1
+for p, tag in (("row", "Row"), ("heat", "Heat"), ("shift_v", "Sv"), ("shift_Cu", "Scu"),
+               ("shift_incl", "Sin"), ("shift_PS", "Sps"), ("heat_TH", "HeatTH"),
+               ("shift_v_TH", "SvTH"), ("shift_v_rev", "Svr")):
+    for m in ("GBR", "RF", "Ridge", "GP"):
+        z = e1[p][m]
+        M[f"MAE{tag}{m}"] = f(z["mae"][0])
+        M[f"RR{tag}{m}"] = f(z["r2"][0], 3)
+        M[f"LR{tag}{m}"] = f(100 * z["lrmse"][0])
+        M[f"BI{tag}{m}"] = f(100 * z["bias"][0])
+        M[f"WF{tag}{m}"] = pct(z["within5"][0], 0)
+M["MAEinfl"] = f(100 * (e1["heat"]["GBR"]["mae"][0] / e1["row"]["GBR"]["mae"][0] - 1), 0)
+M["NtestCu"] = str(e1["shift_Cu"]["GBR"]["n_test"])
+
+# E5
+for sc in ("all", "TH"):
+    for m in ("GBR", "Ridge"):
+        z = e5[f"{sc}_{m}"]; t = sc + m
+        M[f"NullMAE{t}"] = f(z["null_mae"][0])
+        M[f"NullLo{t}"] = f(z["null_mae"][1]); M[f"NullHi{t}"] = f(z["null_mae"][2])
+        for key, k2 in (("Cu", "Cu"), ("v", "V"), ("incl", "In"), ("PS", "Ps")):
+            M[f"Sh{k2}MAE{t}"] = f(z[key]["mae"])
+            M[f"Sh{k2}P{t}"] = f(z[key]["p_mae"], 3)
+            M[f"Sh{k2}Bias{t}"] = f(-100 * z[key]["bias"])        # underprediction, %
+            M[f"Sh{k2}Pb{t}"] = f(1 - z[key]["p_bias"] + 1 / 201, 3)
+        M[f"FracCarbCu{t}"] = pct(z["Cu"]["frac_carb"], 0)
+M["CuMinTest"] = f(e5["all_GBR"]["Cu"]["cu_min_test"], 2)
+for sc in ("all", "TH"):
+    for k in ("std", "eq4", "heat1"):
+        z = e5[f"conf_Cu_{sc}"][k]
+        M[f"CCu{sc}{k}"] = f(z["cov"], 2); M[f"KCu{sc}{k}"] = f(z["k009"], 1)
+        M[f"PCu{sc}{k}"] = f(z["cov_p10"], 2); M[f"HCu{sc}{k}"] = f(100 * (np.exp(z["hw"]) - 1), 1)
+
+# E2
+def put(prefix, z):
+    M[f"{prefix}cov"] = f(z["cov"][0], 2); M[f"{prefix}covp"] = f(z["cov_p10"], 2)
+    M[f"{prefix}hw"] = f(z["strength_pct"], 1); M[f"{prefix}k"] = f(z["k_0.09"], 1)
+    M[f"{prefix}kA"] = f(z["k_0.06"], 1); M[f"{prefix}kB"] = f(z["k_0.12"], 1)
+put("Pone", e2["P1_row"]["std"]); put("Ptwo", e2["P2_heattest_rowcal"]["std"])
+put("Pthr", e2["P3_heattest_heatcal"]["std"]); put("Pthrh", e2["P3_heattest_heatcal"]["heat1"])
+put("Pfs", e2["P4_shift_v"]["std"]); put("Pfe", e2["P4_shift_v"]["eq4"]); put("Pfh", e2["P4_shift_v"]["heat1"])
+put("Pbs", e2["P3b_heat_allmethods"]["std"]); put("Pbe", e2["P3b_heat_allmethods"]["eq4"])
+put("Pbw", e2["P3b_heat_allmethods"]["wcp"])
+M["PfwInf"] = pct(e2["P4_shift_v"]["wcp"]["inf_frac"], 1)
+M["PbwInf"] = pct(e2["P3b_heat_allmethods"]["wcp"]["inf_frac"], 1)
+M["TVshift"] = f(e2["P4_shift_v"]["tv"][0], 2)
+M["RhoShift"] = f(e2["P4_shift_v"]["rho"][0], 1); M["RhoShiftSd"] = f(e2["P4_shift_v"]["rho"][1], 1)
+M["RhoHeat"] = f(e2["P3b_heat_allmethods"]["rho"][0], 1); M["RhoHeatSd"] = f(e2["P3b_heat_allmethods"]["rho"][1], 1)
+cv = e2["P3b_heat_allmethods"]["cov_by_v_tercile"]
+M["CovTa"], M["CovTb"], M["CovTc"] = (f(x, 2) for x in cv)
+M["VtrainHi"] = f(e2["P4_shift_v"]["v_range_train"][1], 2)
+M["VtestLo"] = f(e2["P4_shift_v"]["v_range_test"][0], 2)
+
+# E6
+for k, t in (("heat", "H"), ("shift_v", "V"), ("shift_Cu", "Cu"), ("heat_TH", "HTH"), ("shift_Cu_TH", "CuTH")):
+    z = e6[k]
+    M[f"OneLo{t}"] = f(z["lower95_cov"], 2); M[f"OneLop{t}"] = f(z["lower95_p10"], 2)
+    M[f"OneTwo{t}"] = f(z["two90_cov"], 2)
+    M[f"MissAb{t}"] = pct(z["miss_true_above"], 1); M[f"MissBe{t}"] = pct(z["miss_true_below"], 1)
+
+# E3
+for b in (3, 5, 9, 14, 19, 30):
+    for m, t in (("spec", "S"), ("heat1", "H")):
+        z = e3["E3"][f"{m}_B{b}"]
+        M[f"Bud{t}{b}cov"] = f(z["cov_mean"], 2); M[f"Bud{t}{b}p"] = pct(z["p_below_080"], 0)
+        M[f"Bud{t}{b}inf"] = pct(z["inf_frac"], 0)
+        if z["theory"]:
+            M[f"Bud{t}{b}th"] = pct(z["theory"]["p_below_080"], 0)
+for m in ("GBR", "Ridge"):
+    for H in (10, 20, 40, 60, 80, 100, 115):
+        z = e3["E4"][f"{m}_H{H}"]
+        M[f"LC{m}{H}n"] = str(int(z["n_spec"]))
+        M[f"LC{m}{H}w"] = pct(z["within2_b009"], 0)
+        M[f"LC{m}{H}q"] = f(100 * (np.exp(z["q90"]) - 1), 1)
+        M[f"LC{m}{H}k"] = f(np.exp(z["q90"] / 0.09), 1)
+
+# macro names must be letters only
+def clean(k):
+    rep = {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four", "5": "five",
+           "6": "six", "7": "seven", "8": "eight", "9": "nine"}
+    return "".join(rep.get(c, c) for c in k)
+
+with open(f"{T}/numbers.tex", "w") as fh:
+    fh.write("%% generated by code/make_numbers.py from results/*.json -- do not edit\n")
+    for k, v in M.items():
+        fh.write(f"\\newcommand{{\\N{clean(k)}}}{{{v}}}\n")
+
+# plot data ---------------------------------------------------------------
+with open(f"{T}/plotdata/coverage.dat", "w") as fh:
+    fh.write("x label cov p10\n")
+    rows = [("1", "Row", e2["P1_row"]["std"]), ("2", "HeatRowCal", e2["P2_heattest_rowcal"]["std"]),
+            ("3", "HeatHeatCal", e2["P3_heattest_heatcal"]["std"]),
+            ("4", "ShiftV", e2["P4_shift_v"]["std"]), ("5", "ShiftVeq4", e2["P4_shift_v"]["eq4"])]
+    for x, l, z in rows:
+        fh.write(f"{x} {l} {z['cov'][0]:.4f} {z['cov_p10']:.4f}\n")
+    for x, l, k in (("6", "ShiftCu", "std"), ("7", "ShiftCueq4", "eq4")):
+        z = e5["conf_Cu_all"][k]; fh.write(f"{x} {l} {z['cov']:.4f} {z['cov_p10']:.4f}\n")
+with open(f"{T}/plotdata/budget.dat", "w") as fh:
+    fh.write("B specp heatp spec heat\n")
+    for b in (3, 5, 9, 14, 19, 30):
+        s = e3["E3"][f"spec_B{b}"]; h = e3["E3"][f"heat1_B{b}"]
+        hp = "nan" if h["inf_frac"] > 0.5 else f"{100*h['p_below_080']:.2f}"
+        hc = "nan" if h["inf_frac"] > 0.5 else f"{h['cov_mean']:.4f}"
+        fh.write(f"{b} {100*s['p_below_080']:.2f} {hp} {s['cov_mean']:.4f} {hc}\n")
+with open(f"{T}/plotdata/learning.dat", "w") as fh:
+    fh.write("H nspec gbrk ridgek gbrw ridgew\n")
+    for H in (10, 20, 40, 60, 80, 100, 115):
+        g = e3["E4"][f"GBR_H{H}"]; r = e3["E4"][f"Ridge_H{H}"]
+        fh.write(f"{H} {int(g['n_spec'])} {np.exp(g['q90']/0.09):.3f} {np.exp(r['q90']/0.09):.3f} "
+                 f"{100*g['within2_b009']:.2f} {100*r['within2_b009']:.2f}\n")
+print(len(M), "macros")
